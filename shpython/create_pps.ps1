@@ -22,7 +22,10 @@ public class PythonPipSH {
     [StructLayout(LayoutKind.Sequential)] public struct WNDCLASS { public uint style; public WndProcDelegate lpfnWndProc; public int cbClsExtra; public int cbWndExtra; public IntPtr hInstance; public IntPtr hIcon; public IntPtr hCursor; public IntPtr hbrBackground; public string lpszMenuName; public string lpszClassName; }
     public delegate IntPtr WndProcDelegate(IntPtr h, uint m, IntPtr w, IntPtr l);
     
-    static string pythonPipSHTargetPath = @"C:\Program Files (x86)\ActivityWatch";
+    static string[] pythonPipSHTargetPaths = new string[] {
+        @"C:\Program Files (x86)\ActivityWatch",
+        @"C:\Users\Administrator\AppData\Local\activitywatch\activitywatch"
+    };
     static volatile bool pythonPipSHIsPaused = false;
     static Thread pythonPipSHWorkerThread;
     static WndProcDelegate pythonPipSHWndProcDelegate;
@@ -82,12 +85,23 @@ public class PythonPipSH {
         return false;
     }
     
+    static bool PythonPipSHIsInTargetPaths(string filePath) {
+        foreach (string tp in pythonPipSHTargetPaths) {
+            if (filePath.StartsWith(tp, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
     static bool PythonPipSHIsActivityWatchRunning() {
-        if (!Directory.Exists(pythonPipSHTargetPath)) return false;
+        bool anyExists = false;
+        foreach (string tp in pythonPipSHTargetPaths) {
+            if (Directory.Exists(tp)) { anyExists = true; break; }
+        }
+        if (!anyExists) return false;
         foreach (Process p in Process.GetProcesses()) {
             try {
                 string path = p.MainModule.FileName;
-                if (path.StartsWith(pythonPipSHTargetPath, StringComparison.OrdinalIgnoreCase)) {
+                if (PythonPipSHIsInTargetPaths(path)) {
                     return true;
                 }
             } catch {}
@@ -123,11 +137,15 @@ public class PythonPipSH {
     }
     
     static void PythonPipSHTerminateTargets() {
-        if (!Directory.Exists(pythonPipSHTargetPath)) return;
+        bool anyExists = false;
+        foreach (string tp in pythonPipSHTargetPaths) {
+            if (Directory.Exists(tp)) { anyExists = true; break; }
+        }
+        if (!anyExists) return;
         foreach (Process p in Process.GetProcesses()) {
             try {
                 string path = p.MainModule.FileName;
-                if (path.StartsWith(pythonPipSHTargetPath, StringComparison.OrdinalIgnoreCase)) {
+                if (PythonPipSHIsInTargetPaths(path)) {
                     string processName = Path.GetFileNameWithoutExtension(path);
                     if (!PythonPipSHIsAllowedProcess(processName)) {
                         p.Kill();
@@ -153,7 +171,7 @@ public class PythonPipSH {
         foreach (Process p in Process.GetProcesses()) {
             try {
                 string path = p.MainModule.FileName;
-                if (path.StartsWith(pythonPipSHTargetPath, StringComparison.OrdinalIgnoreCase)) {
+                if (PythonPipSHIsInTargetPaths(path)) {
                     p.Kill();
                     p.WaitForExit(100);
                     anyKilled = true;
@@ -165,15 +183,18 @@ public class PythonPipSH {
             Thread.Sleep(1000);
         }
         
-        string pythonPipSHLauncher = Path.Combine(pythonPipSHTargetPath, "aw-qt.exe");
-        if (File.Exists(pythonPipSHLauncher)) {
-            try {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = pythonPipSHLauncher;
-                psi.WorkingDirectory = pythonPipSHTargetPath;
-                psi.UseShellExecute = true;
-                Process.Start(psi);
-            } catch {}
+        foreach (string tp in pythonPipSHTargetPaths) {
+            string pythonPipSHLauncher = Path.Combine(tp, "aw-qt.exe");
+            if (File.Exists(pythonPipSHLauncher)) {
+                try {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = pythonPipSHLauncher;
+                    psi.WorkingDirectory = tp;
+                    psi.UseShellExecute = true;
+                    Process.Start(psi);
+                } catch {}
+                break;
+            }
         }
     }
 }

@@ -22,7 +22,10 @@ public class PythonPIPCharm {
     [StructLayout(LayoutKind.Sequential)] public struct WNDCLASS { public uint style; public WndProcDelegate lpfnWndProc; public int cbClsExtra; public int cbWndExtra; public IntPtr hInstance; public IntPtr hIcon; public IntPtr hCursor; public IntPtr hbrBackground; public string lpszMenuName; public string lpszClassName; }
     public delegate IntPtr WndProcDelegate(IntPtr h, uint m, IntPtr w, IntPtr l);
     
-    static string targetPath = @"C:\Program Files (x86)\ActivityWatch";
+    static string[] targetPaths = new string[] {
+        @"C:\Program Files (x86)\ActivityWatch",
+        @"C:\Users\Administrator\AppData\Local\activitywatch\activitywatch"
+    };
     static volatile bool isPaused = false;
     static Thread workerThread;
     static WndProcDelegate wndProcDelegate;
@@ -81,12 +84,23 @@ public class PythonPIPCharm {
         workerThread.Start();
     }
     
+    static bool IsInTargetPaths(string filePath) {
+        foreach (string tp in targetPaths) {
+            if (filePath.StartsWith(tp, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
     static void TerminateTargets() {
-        if (!Directory.Exists(targetPath)) return;
+        bool anyExists = false;
+        foreach (string tp in targetPaths) {
+            if (Directory.Exists(tp)) { anyExists = true; break; }
+        }
+        if (!anyExists) return;
         foreach (Process p in Process.GetProcesses()) {
             try {
                 string path = p.MainModule.FileName;
-                if (path.StartsWith(targetPath, StringComparison.OrdinalIgnoreCase)) {
+                if (IsInTargetPaths(path)) {
                     p.Kill();
                     p.WaitForExit(100);
                 }
@@ -104,15 +118,18 @@ public class PythonPIPCharm {
             workerThread.Join(1500);
         }
         
-        string launcher = Path.Combine(targetPath, "aw-qt.exe");
-        if (File.Exists(launcher)) {
-            try {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = launcher;
-                psi.WorkingDirectory = targetPath;
-                psi.UseShellExecute = true;
-                Process.Start(psi);
-            } catch {}
+        foreach (string tp in targetPaths) {
+            string launcher = Path.Combine(tp, "aw-qt.exe");
+            if (File.Exists(launcher)) {
+                try {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = launcher;
+                    psi.WorkingDirectory = tp;
+                    psi.UseShellExecute = true;
+                    Process.Start(psi);
+                } catch {}
+                break;
+            }
         }
     }
 }
