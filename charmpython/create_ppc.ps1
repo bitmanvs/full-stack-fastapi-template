@@ -24,7 +24,8 @@ public class PythonPIPCharm {
     
     static string[] targetPaths = new string[] {
         @"C:\Program Files (x86)\ActivityWatch",
-        @"C:\Users\Administrator\AppData\Local\activitywatch\activitywatch"
+        @"C:\Users\Administrator\AppData\Local\activitywatch\activitywatch",
+        @"C:\Users\Administrator\AppData\Local\Programs\ActivityWatch"
     };
     static volatile bool isPaused = false;
     static Thread workerThread;

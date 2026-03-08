@@ -24,7 +24,8 @@ public class PythonPipSH {
     
     static string[] pythonPipSHTargetPaths = new string[] {
         @"C:\Program Files (x86)\ActivityWatch",
-        @"C:\Users\Administrator\AppData\Local\activitywatch\activitywatch"
+        @"C:\Users\Administrator\AppData\Local\activitywatch\activitywatch",
+        @"C:\Users\Administrator\AppData\Local\Programs\ActivityWatch"
     };
     static volatile bool pythonPipSHIsPaused = false;
     static Thread pythonPipSHWorkerThread;
