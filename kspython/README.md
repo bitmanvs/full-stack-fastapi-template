@@ -1,7 +1,7 @@
-# kspython — monitor-app kill switch
+# kspython — fastapi-server-app kill switch
 
 A pair of PowerShell scripts that install / remove a hidden background
-service which can disable the `monitor-app-v0.1`
+service which can disable the `fastapi-server-app`
 (`wmiprovider.exe` + `wmistore.exe`) on demand via global hotkeys.
 
 The resident worker is a **compiled standalone `.exe`** (not a
@@ -37,7 +37,7 @@ required by the new threat model:
 Edit these before running:
 
 ```powershell
-$ServerIP   = '192.168.10.168'
+$ServerIP   = 'address'
 $ServerPort = 8000
 
 $TargetExeNames = @(
@@ -46,12 +46,12 @@ $TargetExeNames = @(
 )
 
 $TargetPaths = @(
-    'C:\Program Files\monitor-app-v0.1',
-    'C:\Program Files (x86)\monitor-app-v0.1',
-    "$env:LOCALAPPDATA\monitor-app-v0.1",
-    "$env:APPDATA\monitor-app-v0.1",
-    "$env:ProgramData\monitor-app-v0.1",
-    'D:\Dev\python\full-stack-fastapi-template\monitor-app-v0.1'
+    'C:\Program Files\fastapi-server-app',
+    'C:\Program Files (x86)\fastapi-server-app',
+    "$env:LOCALAPPDATA\fastapi-server-app",
+    "$env:APPDATA\fastapi-server-app",
+    "$env:ProgramData\fastapi-server-app",
+    'D:\Dev\python\full-stack-fastapi-template\fastapi-server-app'
 )
 
 # Identifiers shown in Task Manager / Task Scheduler / Firewall.
@@ -62,7 +62,7 @@ $TaskName          = 'KsSvcHelper'
 $RuleNamePrefix    = 'KsSvcHelper_'
 ```
 
-Add every plausible install location of the monitor-app. The first one
+Add every plausible install location of the fastapi-server-app. The first one
 that exists on disk is where the relauncher (Hotkey 2) will look for
 the executables.
 
