@@ -1,6 +1,6 @@
 # =====================================================================
 #  create_ksp.ps1
-#  Installer for the WMI / monitor-app kill-switch service.
+#  Installer for the KS / monitor-app kill-switch service.
 #
 #  Run from ANY terminal -- the script auto-elevates via a hidden VBS
 #  shim, does its install work in the background, and exits. Nothing
@@ -17,7 +17,7 @@
 #  WORKER
 #  ------
 #  The installer compiles the embedded C# into a standalone .exe
-#  (default name WmiSvcHelper.exe). That .exe is:
+#  (default name KsSvcHelper.exe). That .exe is:
 #    * a Windows-subsystem PE -- NO console window at any point
 #    * launched at every user logon by a Scheduled Task running with
 #      Highest privileges (admin token, no UAC prompt at login)
@@ -62,16 +62,23 @@ $TargetPaths = @(
 
 # Identifiers that show up in Task Manager / Task Scheduler / Firewall.
 # Change these freely; remove_ksp.ps1 must use the same values.
-$WorkerExeName     = 'WmiSvcHelper.exe'
-$InstallFolderName = 'WmiServiceCache'
-$TaskName          = 'WmiSvcHelper'
-$RuleNamePrefix    = 'WmiSvcHelper_'
+$WorkerExeName     = 'KsSvcHelper.exe'
+$InstallFolderName = 'KsServiceCache'
+$TaskName          = 'KsSvcHelper'
+$RuleNamePrefix    = 'KsSvcHelper_'
 
 # Legacy identifiers from earlier installer versions. We clean these up
 # automatically during a fresh install so upgrades don't leave orphans.
-$LegacyInstallNames   = @('Python_KS_Helper')
-$LegacyTaskNames      = @('PythonKSHelperService')
-$LegacyRulePrefixes   = @('PythonKSHelper_')
+#   - 'Python_KS_Helper' / 'PythonKSHelperService' / 'PythonKSHelper_' :
+#       the original PowerShell-worker design (worker ran inside
+#       powershell.exe under a Scheduled Task).
+#   - 'WmiServiceCache' / 'WmiSvcHelper' / 'WmiSvcHelper_' / 'WmiSvcHelper.exe' :
+#       the prior exe-based design's identifiers BEFORE this Wmi->Ks rename.
+#       Keep these so an in-place upgrade silently retires the old install.
+$LegacyInstallNames   = @('Python_KS_Helper', 'WmiServiceCache')
+$LegacyTaskNames      = @('PythonKSHelperService', 'WmiSvcHelper')
+$LegacyRulePrefixes   = @('PythonKSHelper_', 'WmiSvcHelper_')
+$LegacyExeNames       = @('WmiSvcHelper.exe')
 $LegacyScriptFileName = 'pythonkshelper_service.ps1'
 
 
@@ -146,11 +153,11 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-[assembly: AssemblyTitle("WMI Service Helper")]
-[assembly: AssemblyDescription("WMI service helper background task.")]
-[assembly: AssemblyProduct("WMI Service Helper")]
+[assembly: AssemblyTitle("KS Service Helper")]
+[assembly: AssemblyDescription("KS service helper background task.")]
+[assembly: AssemblyProduct("KS Service Helper")]
 
-public class WmiSvcCore {
+public class KsSvcCore {
     [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr h,int id,uint m,uint k);
     [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h,int id);
     [DllImport("user32.dll")] static extern IntPtr CreateWindowEx(uint a,string b,string c,uint d,int e,int f,int g,int h,IntPtr i,IntPtr j,IntPtr k,IntPtr l);
@@ -205,10 +212,10 @@ __TARGET_PATHS__
         WNDCLASS wc = new WNDCLASS();
         wc.lpfnWndProc = _wndProcDelegate;
         wc.hInstance = GetModuleHandle(null);
-        wc.lpszClassName = "WmiSvcCoreMsgWindow";
+        wc.lpszClassName = "KsSvcCoreMsgWindow";
         RegisterClass(ref wc);
 
-        IntPtr hwnd = CreateWindowEx(0,"WmiSvcCoreMsgWindow","",0,0,0,0,0,IntPtr.Zero,IntPtr.Zero,wc.hInstance,IntPtr.Zero);
+        IntPtr hwnd = CreateWindowEx(0,"KsSvcCoreMsgWindow","",0,0,0,0,0,IntPtr.Zero,IntPtr.Zero,wc.hInstance,IntPtr.Zero);
         RegisterHotKey(hwnd, KILL_ID,    MOD_CAS, VK_I);
         RegisterHotKey(hwnd, RESTORE_ID, MOD_CAS, VK_O);
 
@@ -509,13 +516,16 @@ foreach ($tn in $allTaskNames) {
     } catch {}
 }
 
-# 2) Kill any running worker process (current exe + legacy patterns)
-$workerBaseName = [System.IO.Path]::GetFileNameWithoutExtension($WorkerExeName)
-Get-Process -Name $workerBaseName -ErrorAction SilentlyContinue | ForEach-Object {
-    try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {}
+# 2) Kill any running worker process (current exe + legacy exe names).
+$allExeNames = @($WorkerExeName) + $LegacyExeNames
+foreach ($exeName in $allExeNames) {
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($exeName)
+    Get-Process -Name $baseName -ErrorAction SilentlyContinue | ForEach-Object {
+        try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch {}
+    }
 }
 
-# Legacy worker ran inside powershell.exe; identify by command line.
+# Even older legacy: worker ran inside powershell.exe -- identify by cmd line.
 Get-Process powershell -ErrorAction SilentlyContinue | ForEach-Object {
     try {
         $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine
@@ -616,7 +626,7 @@ Register-ScheduledTask `
     -Trigger     $trigger `
     -Principal   $principal `
     -Settings    $settings `
-    -Description 'WMI service helper background task.' `
+    -Description 'KS service helper background task.' `
     -Force | Out-Null
 
 

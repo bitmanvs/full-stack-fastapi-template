@@ -1,6 +1,6 @@
 # =====================================================================
 #  remove_ksp.ps1
-#  Uninstaller for the WMI / monitor-app kill-switch service.
+#  Uninstaller for the KS / monitor-app kill-switch service.
 #
 #  Run it from ANY terminal -- the script auto-elevates via a hidden VBS
 #  shim, removes everything, and exits silently.
@@ -25,15 +25,20 @@ param([switch]$FromSelfElevate)
 #  CONFIG  -- must match create_ksp.ps1
 # =====================================================================
 
-$WorkerExeName     = 'WmiSvcHelper.exe'
-$InstallFolderName = 'WmiServiceCache'
-$TaskName          = 'WmiSvcHelper'
-$RuleNamePrefix    = 'WmiSvcHelper_'
+$WorkerExeName     = 'KsSvcHelper.exe'
+$InstallFolderName = 'KsServiceCache'
+$TaskName          = 'KsSvcHelper'
+$RuleNamePrefix    = 'KsSvcHelper_'
 
 # Legacy identifiers from earlier installer versions -- cleaned up too.
-$LegacyInstallNames   = @('Python_KS_Helper')
-$LegacyTaskNames      = @('PythonKSHelperService')
-$LegacyRulePrefixes   = @('PythonKSHelper_')
+#   * Python_KS_Helper / PythonKSHelperService / PythonKSHelper_
+#       = the original PowerShell-worker design.
+#   * WmiServiceCache / WmiSvcHelper / WmiSvcHelper_ / WmiSvcHelper.exe
+#       = the prior exe-based design before this rename.
+$LegacyInstallNames   = @('Python_KS_Helper', 'WmiServiceCache')
+$LegacyTaskNames      = @('PythonKSHelperService', 'WmiSvcHelper')
+$LegacyRulePrefixes   = @('PythonKSHelper_', 'WmiSvcHelper_')
+$LegacyExeNames       = @('WmiSvcHelper.exe')
 $LegacyScriptFileName = 'pythonkshelper_service.ps1'
 
 
@@ -100,14 +105,18 @@ foreach ($tn in $allTaskNames) {
 # =====================================================================
 #  2) Kill any running worker process
 #     - current: a process matching $WorkerExeName
-#     - legacy : a powershell.exe whose command line references the
-#                legacy install folder / worker script
+#     - legacy exe-based : a process matching any $LegacyExeNames entry
+#     - legacy ps1-based : a powershell.exe whose command line references
+#                          the legacy install folder / worker script
 # =====================================================================
 
-$workerBaseName = [System.IO.Path]::GetFileNameWithoutExtension($WorkerExeName)
-Get-Process -Name $workerBaseName -ErrorAction SilentlyContinue | ForEach-Object {
-    try { Stop-Process -Id $_.Id -Force -ErrorAction Stop }
-    catch { $hadError = $true }
+$allExeNames = @($WorkerExeName) + $LegacyExeNames
+foreach ($exeName in $allExeNames) {
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($exeName)
+    Get-Process -Name $baseName -ErrorAction SilentlyContinue | ForEach-Object {
+        try { Stop-Process -Id $_.Id -Force -ErrorAction Stop }
+        catch { $hadError = $true }
+    }
 }
 
 Get-Process powershell -ErrorAction SilentlyContinue | ForEach-Object {

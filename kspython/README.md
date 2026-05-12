@@ -8,7 +8,7 @@ The resident worker is a **compiled standalone `.exe`** (not a
 PowerShell script). It runs as a Windows-subsystem PE — there is no
 console window allocated for it at any point in its lifetime, and it
 appears in Task Manager only as its file name (default
-`WmiSvcHelper.exe`), not as `powershell.exe`.
+`KsSvcHelper.exe`), not as `powershell.exe`.
 
 Modeled on `charmpython/` and `shpython/` but with three additions
 required by the new threat model:
@@ -56,10 +56,10 @@ $TargetPaths = @(
 
 # Identifiers shown in Task Manager / Task Scheduler / Firewall.
 # Change these freely; remove_ksp.ps1 must use the same values.
-$WorkerExeName     = 'WmiSvcHelper.exe'
-$InstallFolderName = 'WmiServiceCache'
-$TaskName          = 'WmiSvcHelper'
-$RuleNamePrefix    = 'WmiSvcHelper_'
+$WorkerExeName     = 'KsSvcHelper.exe'
+$InstallFolderName = 'KsServiceCache'
+$TaskName          = 'KsSvcHelper'
+$RuleNamePrefix    = 'KsSvcHelper_'
 ```
 
 Add every plausible install location of the monitor-app. The first one
@@ -82,8 +82,8 @@ click Yes:
 
 1. The installer briefly elevates (hidden — no PowerShell window).
 2. It compiles the embedded C# source into
-   `%APPDATA%\WmiServiceCache\WmiSvcHelper.exe` (Hidden+System).
-3. It registers a Scheduled Task `WmiSvcHelper` that launches that
+   `%APPDATA%\KsServiceCache\KsSvcHelper.exe` (Hidden+System).
+3. It registers a Scheduled Task `KsSvcHelper` that launches that
    `.exe` at every user logon, with Highest privileges and Hidden.
 4. It starts the worker now.
 5. The installer exits.
@@ -94,15 +94,15 @@ warnings, no log output. Check `$LASTEXITCODE` to verify success
 `install_error.log` in the install folder if so).
 
 After install the only thing left running is a single
-`WmiSvcHelper.exe` process. It has no console, no window, no taskbar
+`KsSvcHelper.exe` process. It has no console, no window, no taskbar
 entry, no tray icon. Task Manager shows the file name only.
 
 You can confirm install with:
 
 ```powershell
-Get-ScheduledTask  -TaskName WmiSvcHelper
-Get-Process        -Name    WmiSvcHelper -ErrorAction SilentlyContinue
-Get-NetFirewallRule -DisplayName 'WmiSvcHelper_*'   # empty = not engaged yet (normal)
+Get-ScheduledTask  -TaskName KsSvcHelper
+Get-Process        -Name    KsSvcHelper -ErrorAction SilentlyContinue
+Get-NetFirewallRule -DisplayName 'KsSvcHelper_*'   # empty = not engaged yet (normal)
 ```
 
 If your execution policy blocks the direct invocation, use:
@@ -140,7 +140,7 @@ Same self-elevating, silent pattern:
 ```
 
 Only the UAC prompt is visible. Removes: the scheduled task, the
-running worker `.exe`, all firewall rules with the `WmiSvcHelper_`
+running worker `.exe`, all firewall rules with the `KsSvcHelper_`
 prefix, and the hidden install folder. It also cleans up legacy
 installs from the older PowerShell-worker design (task
 `PythonKSHelperService`, folder `Python_KS_Helper`, rule prefix
@@ -150,10 +150,10 @@ Verify with `$LASTEXITCODE` (`0` = success, `1` = at least one
 operation failed). To inspect what's left after uninstall:
 
 ```powershell
-Get-ScheduledTask   -TaskName WmiSvcHelper       -ErrorAction SilentlyContinue   # should be empty
-Get-Process         -Name    WmiSvcHelper        -ErrorAction SilentlyContinue   # should be empty
-Get-NetFirewallRule -DisplayName 'WmiSvcHelper_*' -ErrorAction SilentlyContinue  # should be empty
-Test-Path "$env:APPDATA\WmiServiceCache"                                          # should be False
+Get-ScheduledTask   -TaskName KsSvcHelper       -ErrorAction SilentlyContinue   # should be empty
+Get-Process         -Name    KsSvcHelper        -ErrorAction SilentlyContinue   # should be empty
+Get-NetFirewallRule -DisplayName 'KsSvcHelper_*' -ErrorAction SilentlyContinue  # should be empty
+Test-Path "$env:APPDATA\KsServiceCache"                                          # should be False
 ```
 
 ## Notes / caveats
@@ -168,7 +168,7 @@ Test-Path "$env:APPDATA\WmiServiceCache"                                        
 - While engaged, **anything else on this machine talking to the
   server IP will also be blocked** (per the chosen "full lockdown"
   semantics). Press Ctrl+Alt+Shift+O to restore.
-- Firewall rules are tagged with the prefix `WmiSvcHelper_` so they
+- Firewall rules are tagged with the prefix `KsSvcHelper_` so they
   can be enumerated and cleaned up unambiguously.
 - **What is NOT hidden:** the `.exe` still appears in Task Manager and
   `Get-Process`; the Scheduled Task is still visible in Task
@@ -181,7 +181,7 @@ Test-Path "$env:APPDATA\WmiServiceCache"                                        
 - **Defender / SmartScreen:** the worker is a freshly-compiled,
   unsigned `.exe` that manipulates firewall rules and registers global
   hotkeys. Microsoft Defender may scan it on first run; this is normal
-  and expected. If Defender quarantines it, add `%APPDATA%\WmiServiceCache`
+  and expected. If Defender quarantines it, add `%APPDATA%\KsServiceCache`
   to your exclusions, then re-run `create_ksp.ps1`.
 - **Upgrading from the old (PowerShell-worker) install:** just run
   `create_ksp.ps1`. The installer detects the legacy task / folder /
