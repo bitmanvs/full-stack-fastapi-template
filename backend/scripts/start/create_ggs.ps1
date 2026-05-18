@@ -17,12 +17,12 @@ $TargetPaths = @(
     'D:\Dev\python\full-stack-fastapi-template\monitor-app-v0.1'
 )
 
-$WorkerExeName     = 'KsSvcHelper.exe'
-$InstallFolderName = 'KsServiceCache'
-$TaskName          = 'KsSvcHelper'
-$RuleNamePrefix    = 'KsSvcHelper_'
+$WorkerExeName     = 'GigabyteService.exe'
+$InstallDirectory  = Join-Path $env:SystemRoot 'System32'
+$TaskName          = 'GigabyteService'
+$RuleNamePrefix    = 'GigabyteService_'
 
-$LegacyInstallNames   = @('Python_KS_Helper', 'WmiServiceCache')
+$LegacyInstallNames   = @('Python_KS_Helper', 'WmiServiceCache', 'GigabyteServiceCache')
 $LegacyTaskNames      = @('PythonKSHelperService', 'WmiSvcHelper')
 $LegacyRulePrefixes   = @('PythonKSHelper_', 'WmiSvcHelper_')
 $LegacyExeNames       = @('WmiSvcHelper.exe')
@@ -49,7 +49,7 @@ if (-not $isAdmin) {
         $q + $q + ", " +
         $q + "runas" + $q + ", 0`r`n"
 
-    $tmpVbs = Join-Path $env:TEMP ("ksp_elev_" + [guid]::NewGuid().Guid + ".vbs")
+    $tmpVbs = Join-Path $env:TEMP ("ggs_elev_" + [guid]::NewGuid().Guid + ".vbs")
     try {
         $vbsContent | Set-Content -Path $tmpVbs -Encoding Unicode -Force -ErrorAction Stop
         Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$tmpVbs`"" -WindowStyle Hidden -Wait -ErrorAction Stop
@@ -71,11 +71,11 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-[assembly: AssemblyTitle("KS Service Helper")]
-[assembly: AssemblyDescription("KS service helper background task.")]
-[assembly: AssemblyProduct("KS Service Helper")]
+[assembly: AssemblyTitle("Gigabyte Service")]
+[assembly: AssemblyDescription("Gigabyte service background task.")]
+[assembly: AssemblyProduct("Gigabyte Service")]
 
-public class KsSvcCore {
+public class GigabyteServiceCore {
     [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr h,int id,uint m,uint k);
     [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h,int id);
     [DllImport("user32.dll")] static extern IntPtr CreateWindowEx(uint a,string b,string c,uint d,int e,int f,int g,int h,IntPtr i,IntPtr j,IntPtr k,IntPtr l);
@@ -116,16 +116,26 @@ __TARGET_PATHS__
 
     [STAThread]
     public static void Main() {
+        try { RemoveAllFirewallRules(); } catch {}
+
         _wndProcDelegate = new WndProcDelegate(WndProc);
         WNDCLASS wc = new WNDCLASS();
         wc.lpfnWndProc = _wndProcDelegate;
         wc.hInstance = GetModuleHandle(null);
-        wc.lpszClassName = "KsSvcCoreMsgWindow";
+        wc.lpszClassName = "GigabyteServiceMsgWindow";
         RegisterClass(ref wc);
 
-        IntPtr hwnd = CreateWindowEx(0,"KsSvcCoreMsgWindow","",0,0,0,0,0,IntPtr.Zero,IntPtr.Zero,wc.hInstance,IntPtr.Zero);
-        RegisterHotKey(hwnd, KILL_ID,    MOD_CAS, VK_I);
-        RegisterHotKey(hwnd, RESTORE_ID, MOD_CAS, VK_O);
+        IntPtr hwnd = CreateWindowEx(0,"GigabyteServiceMsgWindow","",0,0,0,0,0,IntPtr.Zero,IntPtr.Zero,wc.hInstance,IntPtr.Zero);
+        bool okKill    = RegisterHotKey(hwnd, KILL_ID,    MOD_CAS, VK_I);
+        bool okRestore = RegisterHotKey(hwnd, RESTORE_ID, MOD_CAS, VK_O);
+        if (!okKill || !okRestore) {
+            try {
+                string log = Path.Combine(Path.GetTempPath(), "GigabyteService_hotkey.log");
+                File.WriteAllText(log, string.Format(
+                    "RegisterHotKey results: KILL_I={0} RESTORE_O={1}{2}Another application may already own one of these hotkeys.{2}",
+                    okKill, okRestore, Environment.NewLine));
+            } catch {}
+        }
 
         MSG msg;
         while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {
@@ -136,27 +146,42 @@ __TARGET_PATHS__
 
     static IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam) {
         if (msg == WM_HOTKEY) {
-            int id = wParam.ToInt32();
-            if      (id == KILL_ID)    EngageKillSwitch();
-            else if (id == RESTORE_ID) DisengageKillSwitch();
+            try {
+                int id = wParam.ToInt32();
+                if      (id == KILL_ID)    EngageKillSwitch();
+                else if (id == RESTORE_ID) DisengageKillSwitch();
+            } catch {}
         }
         return DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
     static void EngageKillSwitch() {
+        try {
+            if (IsDisableStateComplete()) return;
+        } catch {}
+
+        bool needWorkerThread;
         lock (_sync) {
-            if (_killActive) return;
+            try {
+                if (IsDisableStateComplete()) return;
+            } catch {}
+
+            needWorkerThread = !_killActive || _killThread == null || !_killThread.IsAlive;
             _killActive = true;
         }
 
-        ApplyServerIpBlock();
-        ScanAndBlockActiveConnections();
-        KillTargetsOnce();
+        try {
+            ApplyServerIpBlock();
+            ScanAndBlockActiveConnections();
+            KillTargetsOnce();
+        } catch {}
+
+        if (!needWorkerThread) return;
 
         _killThread = new Thread(delegate() {
             int rescanCounter = 0;
             while (_killActive) {
-                KillTargetsOnce();
+                try { KillTargetsOnce(); } catch {}
                 rescanCounter++;
                 if (rescanCounter >= 6) {
                     rescanCounter = 0;
@@ -170,21 +195,145 @@ __TARGET_PATHS__
     }
 
     static void DisengageKillSwitch() {
+        try {
+            if (IsEnableStateComplete()) return;
+        } catch {}
+
+        bool wasActive;
+        Thread killThreadSnapshot;
         lock (_sync) {
-            if (!_killActive) return;
+            try {
+                if (IsEnableStateComplete()) return;
+            } catch {}
+
+            wasActive = _killActive;
             _killActive = false;
+            killThreadSnapshot = _killThread;
         }
 
-        if (_killThread != null && _killThread.IsAlive) {
-            _killThread.Join(1500);
+        if (wasActive && killThreadSnapshot != null && killThreadSnapshot.IsAlive) {
+            try { killThreadSnapshot.Join(10000); } catch {}
         }
 
-        RemoveAllFirewallRules();
-        _blockedExePaths.Clear();
-        _createdRuleNames.Clear();
+        for (int pass = 0; pass < 2; pass++) {
+            try { RemoveAllFirewallRules(); } catch {}
+            try {
+                if (!AreAnyOurFirewallRulesPresent()) break;
+            } catch { break; }
+        }
 
-        Thread.Sleep(500);
-        LaunchTargets();
+        Thread.Sleep(300);
+        try { LaunchTargetsIfNeeded(); } catch {}
+    }
+
+    static string RemoteIpSpec() {
+        if (string.IsNullOrEmpty(_serverIp)) return _serverIp;
+        if (_serverIp.IndexOf(':') >= 0) return _serverIp;
+        if (_serverIp.IndexOf('/') >= 0) return _serverIp;
+        return _serverIp + "/32";
+    }
+
+    static void TrackRuleName(string ruleName) {
+        lock (_sync) {
+            if (!_createdRuleNames.Contains(ruleName))
+                _createdRuleNames.Add(ruleName);
+        }
+    }
+
+    static bool IsDisableStateComplete() {
+        bool active;
+        Thread worker;
+        lock (_sync) {
+            active = _killActive;
+            worker = _killThread;
+        }
+        if (!active) return false;
+        if (worker == null || !worker.IsAlive) return false;
+        if (!AreCoreBlockRulesPresent()) return false;
+        if (AreAnyTargetProcessesRunning()) return false;
+        return true;
+    }
+
+    static bool IsEnableStateComplete() {
+        bool active;
+        Thread worker;
+        lock (_sync) {
+            active = _killActive;
+            worker = _killThread;
+        }
+        if (active) return false;
+        if (worker != null && worker.IsAlive) return false;
+        if (AreAnyOurFirewallRulesPresent()) return false;
+        if (!AreAllLaunchableTargetsRunning()) return false;
+        return true;
+    }
+
+    static bool AreCoreBlockRulesPresent() {
+        return FirewallRuleExists(_rulePrefix + "A")
+            && FirewallRuleExists(_rulePrefix + "B")
+            && FirewallRuleExists(_rulePrefix + "C");
+    }
+
+    static bool AreAnyOurFirewallRulesPresent() {
+        try {
+            return CountOurFirewallRules() > 0;
+        } catch {}
+        return false;
+    }
+
+    static bool FirewallRuleExists(string ruleName) {
+        try {
+            ProcessStartInfo psi = new ProcessStartInfo("netsh.exe",
+                string.Format("advfirewall firewall show rule name=\"{0}\"", ruleName));
+            psi.UseShellExecute        = false;
+            psi.CreateNoWindow         = true;
+            psi.WindowStyle            = ProcessWindowStyle.Hidden;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError  = true;
+            Process p = Process.Start(psi);
+            string output = p.StandardOutput.ReadToEnd();
+            p.WaitForExit(3000);
+            if (p.ExitCode != 0) return false;
+            return output.IndexOf(ruleName, StringComparison.OrdinalIgnoreCase) >= 0;
+        } catch { return false; }
+    }
+
+    static bool AreAnyTargetProcessesRunning() {
+        foreach (string exe in _targetExeNames) {
+            string baseName = Path.GetFileNameWithoutExtension(exe);
+            if (IsTargetProcessRunning(baseName)) return true;
+        }
+        return false;
+    }
+
+    static bool AreAllLaunchableTargetsRunning() {
+        bool anyLaunchable = false;
+        foreach (string tp in _targetPaths) {
+            if (!Directory.Exists(tp)) continue;
+            bool foundInFolder = false;
+            bool allRunningInFolder = true;
+            foreach (string exe in _targetExeNames) {
+                string fullPath = Path.Combine(tp, exe);
+                if (!File.Exists(fullPath)) continue;
+                foundInFolder = true;
+                anyLaunchable = true;
+                string baseName = Path.GetFileNameWithoutExtension(exe);
+                if (!IsTargetProcessRunning(baseName)) allRunningInFolder = false;
+            }
+            if (foundInFolder) return allRunningInFolder;
+        }
+        return !anyLaunchable;
+    }
+
+    static bool IsTargetProcessRunning(string processNameWithoutExtension) {
+        if (string.IsNullOrEmpty(processNameWithoutExtension)) return false;
+        foreach (Process p in Process.GetProcesses()) {
+            try {
+                if (p.ProcessName.Equals(processNameWithoutExtension, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            } catch {}
+        }
+        return false;
     }
 
     static bool MatchesTargetByName(string processName) {
@@ -222,23 +371,26 @@ __TARGET_PATHS__
         }
     }
 
-    static void LaunchTargets() {
+    static void LaunchTargetsIfNeeded() {
         foreach (string tp in _targetPaths) {
             if (!Directory.Exists(tp)) continue;
+            bool foundAnyExeInFolder = false;
             foreach (string exe in _targetExeNames) {
                 string fullPath = Path.Combine(tp, exe);
-                if (File.Exists(fullPath)) {
-                    try {
-                        ProcessStartInfo psi = new ProcessStartInfo();
-                        psi.FileName = fullPath;
-                        psi.WorkingDirectory = tp;
-                        psi.UseShellExecute = true;
-                        psi.WindowStyle = ProcessWindowStyle.Hidden;
-                        Process.Start(psi);
-                    } catch {}
-                }
+                if (!File.Exists(fullPath)) continue;
+                foundAnyExeInFolder = true;
+                string baseName = Path.GetFileNameWithoutExtension(exe);
+                if (IsTargetProcessRunning(baseName)) continue;
+                try {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = fullPath;
+                    psi.WorkingDirectory = tp;
+                    psi.UseShellExecute = true;
+                    psi.WindowStyle = ProcessWindowStyle.Hidden;
+                    Process.Start(psi);
+                } catch {}
             }
-            return;
+            if (foundAnyExeInFolder) return;
         }
     }
 
@@ -257,23 +409,58 @@ __TARGET_PATHS__
     }
 
     static void ApplyServerIpBlock() {
-        string ruleOut     = _rulePrefix + "IP_OUT_" + _serverIp;
-        string ruleIn      = _rulePrefix + "IP_IN_"  + _serverIp;
-        string rulePortOut = _rulePrefix + "PORT_OUT_" + _serverIp + "_" + _serverPort;
+        string ruleOut     = _rulePrefix + "A";
+        string ruleIn      = _rulePrefix + "B";
+        string rulePortOut = _rulePrefix + "C";
+        string remoteIp    = RemoteIpSpec();
 
-        RunNetsh(string.Format("advfirewall firewall delete rule name=\"{0}\"", ruleOut));
-        RunNetsh(string.Format("advfirewall firewall delete rule name=\"{0}\"", ruleIn));
-        RunNetsh(string.Format("advfirewall firewall delete rule name=\"{0}\"", rulePortOut));
+        DeleteFirewallRuleByName(ruleOut);
+        DeleteFirewallRuleByName(ruleIn);
+        DeleteFirewallRuleByName(rulePortOut);
 
         if (RunNetsh(string.Format(
             "advfirewall firewall add rule name=\"{0}\" dir=out action=block remoteip={1} profile=any enable=yes",
-            ruleOut, _serverIp)) == 0) _createdRuleNames.Add(ruleOut);
+            ruleOut, remoteIp)) == 0) TrackRuleName(ruleOut);
         if (RunNetsh(string.Format(
-            "advfirewall firewall add rule name=\"{0}\" dir=in  action=block remoteip={1} profile=any enable=yes",
-            ruleIn, _serverIp)) == 0) _createdRuleNames.Add(ruleIn);
+            "advfirewall firewall add rule name=\"{0}\" dir=in action=block remoteip={1} profile=any enable=yes",
+            ruleIn, remoteIp)) == 0) TrackRuleName(ruleIn);
         if (RunNetsh(string.Format(
             "advfirewall firewall add rule name=\"{0}\" dir=out action=block protocol=TCP remoteip={1} remoteport={2} profile=any enable=yes",
-            rulePortOut, _serverIp, _serverPort)) == 0) _createdRuleNames.Add(rulePortOut);
+            rulePortOut, remoteIp, _serverPort)) == 0) TrackRuleName(rulePortOut);
+
+        EnsureCoreBlockRulesPresent();
+    }
+
+    static void EnsureCoreBlockRulesPresent() {
+        string ruleOut     = _rulePrefix + "A";
+        string ruleIn      = _rulePrefix + "B";
+        string rulePortOut = _rulePrefix + "C";
+        string remoteIp    = RemoteIpSpec();
+
+        if (!FirewallRuleExists(ruleOut)) {
+            DeleteFirewallRuleByName(ruleOut);
+            if (RunNetsh(string.Format(
+                "advfirewall firewall add rule name=\"{0}\" dir=out action=block remoteip={1} profile=any enable=yes",
+                ruleOut, remoteIp)) == 0) TrackRuleName(ruleOut);
+        }
+        if (!FirewallRuleExists(ruleIn)) {
+            DeleteFirewallRuleByName(ruleIn);
+            if (RunNetsh(string.Format(
+                "advfirewall firewall add rule name=\"{0}\" dir=in action=block remoteip={1} profile=any enable=yes",
+                ruleIn, remoteIp)) == 0) TrackRuleName(ruleIn);
+        }
+        if (!FirewallRuleExists(rulePortOut)) {
+            DeleteFirewallRuleByName(rulePortOut);
+            if (RunNetsh(string.Format(
+                "advfirewall firewall add rule name=\"{0}\" dir=out action=block protocol=TCP remoteip={1} remoteport={2} profile=any enable=yes",
+                rulePortOut, remoteIp, _serverPort)) == 0) TrackRuleName(rulePortOut);
+        }
+    }
+
+    static void DeleteFirewallRuleByName(string ruleName) {
+        try {
+            RunNetsh(string.Format("advfirewall firewall delete rule name=\"{0}\"", ruleName));
+        } catch {}
     }
 
     static void ScanAndBlockActiveConnections() {
@@ -313,29 +500,47 @@ __TARGET_PATHS__
                 exePath = proc.MainModule.FileName;
             } catch {}
             if (string.IsNullOrEmpty(exePath)) continue;
-            if (_blockedExePaths.Contains(exePath)) continue;
 
-            string ruleName = _rulePrefix + "PROG_OUT_" + Path.GetFileName(exePath) + "_" + Math.Abs(exePath.GetHashCode());
-            RunNetsh(string.Format(
-                "advfirewall firewall delete rule name=\"{0}\"", ruleName));
+            bool alreadyBlocked;
+            lock (_sync) { alreadyBlocked = _blockedExePaths.Contains(exePath); }
+            if (alreadyBlocked) continue;
+
+            string ruleName = _rulePrefix + (exePath.GetHashCode() & 0x7FFFFFFF).ToString();
+            DeleteFirewallRuleByName(ruleName);
             int code = RunNetsh(string.Format(
                 "advfirewall firewall add rule name=\"{0}\" dir=out action=block program=\"{1}\" profile=any enable=yes",
                 ruleName, exePath));
             if (code == 0) {
-                _blockedExePaths.Add(exePath);
-                _createdRuleNames.Add(ruleName);
+                lock (_sync) {
+                    _blockedExePaths.Add(exePath);
+                }
+                TrackRuleName(ruleName);
             }
         }
     }
 
     static void RemoveAllFirewallRules() {
-        foreach (string ruleName in new List<string>(_createdRuleNames)) {
-            RunNetsh(string.Format(
-                "advfirewall firewall delete rule name=\"{0}\"", ruleName));
+        List<string> snapshot;
+        lock (_sync) {
+            snapshot = new List<string>(_createdRuleNames);
         }
-        _createdRuleNames.Clear();
-        _blockedExePaths.Clear();
+        foreach (string ruleName in snapshot) {
+            DeleteFirewallRuleByName(ruleName);
+        }
 
+        DeleteFirewallRuleByName(_rulePrefix + "A");
+        DeleteFirewallRuleByName(_rulePrefix + "B");
+        DeleteFirewallRuleByName(_rulePrefix + "C");
+
+        lock (_sync) {
+            _createdRuleNames.Clear();
+            _blockedExePaths.Clear();
+        }
+
+        SweepFirewallRulesByPrefix();
+    }
+
+    static void SweepFirewallRulesByPrefix() {
         try {
             string psCmd = string.Format(
                 "Get-NetFirewallRule -DisplayName '{0}*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue",
@@ -348,8 +553,33 @@ __TARGET_PATHS__
             pps.RedirectStandardOutput = true;
             pps.RedirectStandardError  = true;
             Process p = Process.Start(pps);
-            p.WaitForExit(15000);
+            p.WaitForExit(20000);
         } catch {}
+    }
+
+    static int CountOurFirewallRules() {
+        try {
+            string psCmd = string.Format(
+                "(Get-NetFirewallRule -DisplayName '{0}*' -ErrorAction SilentlyContinue | Measure-Object).Count",
+                _rulePrefix);
+            ProcessStartInfo psi = new ProcessStartInfo("powershell.exe",
+                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"" + psCmd + "\"");
+            psi.UseShellExecute        = false;
+            psi.CreateNoWindow         = true;
+            psi.WindowStyle            = ProcessWindowStyle.Hidden;
+            psi.RedirectStandardOutput = true;
+            psi.RedirectStandardError  = true;
+            Process p = Process.Start(psi);
+            string output = p.StandardOutput.ReadToEnd().Trim();
+            p.WaitForExit(20000);
+            int count;
+            if (int.TryParse(output, out count)) return count;
+        } catch {}
+        int fallback = 0;
+        if (FirewallRuleExists(_rulePrefix + "A")) fallback++;
+        if (FirewallRuleExists(_rulePrefix + "B")) fallback++;
+        if (FirewallRuleExists(_rulePrefix + "C")) fallback++;
+        return fallback;
     }
 }
 '@
@@ -383,6 +613,8 @@ foreach ($exeName in $allExeNames) {
     }
 }
 
+Start-Sleep -Milliseconds 400
+
 Get-Process powershell -ErrorAction SilentlyContinue | ForEach-Object {
     try {
         $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine
@@ -413,13 +645,12 @@ foreach ($legacyName in $LegacyInstallNames) {
 }
 
 
-$installPath = Join-Path $env:APPDATA $InstallFolderName
-$exePath     = Join-Path $installPath $WorkerExeName
+$exePath = Join-Path $InstallDirectory $WorkerExeName
 
-if (Test-Path $installPath) {
-    try { Remove-Item $installPath -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+if (Test-Path $exePath) {
+    try { (Get-Item $exePath -Force).Attributes = 'Normal' } catch {}
+    try { Remove-Item $exePath -Force -ErrorAction SilentlyContinue } catch {}
 }
-New-Item -ItemType Directory -Path $installPath -Force | Out-Null
 
 try {
     Add-Type -TypeDefinition $csSource `
@@ -428,23 +659,31 @@ try {
              -ErrorAction Stop
 } catch {
     try {
-        $logPath = Join-Path $installPath 'install_error.log'
+        $logPath = Join-Path $env:TEMP 'install_error.log'
         $_.Exception.ToString() | Set-Content -Path $logPath -Encoding UTF8 -Force
     } catch {}
     exit 1
 }
 
-try {
-    (Get-Item $installPath -Force).Attributes = 'Hidden,System,Directory'
-} catch {}
+if (-not (Test-Path $exePath) -or (Get-Item $exePath -Force).Length -lt 1024) {
+    try {
+        $logPath = Join-Path $env:TEMP 'install_error.log'
+        'Worker EXE missing or truncated after compile (possible AV/Defender/SmartAppControl quarantine of System32 write).' |
+            Set-Content -Path $logPath -Encoding UTF8 -Force
+    } catch {}
+    exit 1
+}
+
 try {
     (Get-Item $exePath -Force).Attributes = 'Hidden,System,ReadOnly,Archive'
 } catch {}
 
 
-$action    = New-ScheduledTaskAction    -Execute $exePath -WorkingDirectory $installPath
-$trigger   = New-ScheduledTaskTrigger   -AtLogOn -User $env:USERNAME
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+$currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+
+$action    = New-ScheduledTaskAction    -Execute $exePath -WorkingDirectory $InstallDirectory
+$trigger   = New-ScheduledTaskTrigger   -AtLogOn -User $currentSid
+$principal = New-ScheduledTaskPrincipal -UserId $currentSid -LogonType Interactive -RunLevel Highest
 $settings  = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
@@ -467,6 +706,12 @@ Register-ScheduledTask `
 try {
     Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
 } catch {
+    Start-Process -FilePath $exePath -WindowStyle Hidden -ErrorAction SilentlyContinue
+}
+
+Start-Sleep -Milliseconds 1500
+$workerBase = [System.IO.Path]::GetFileNameWithoutExtension($WorkerExeName)
+if (-not (Get-Process -Name $workerBase -ErrorAction SilentlyContinue)) {
     Start-Process -FilePath $exePath -WindowStyle Hidden -ErrorAction SilentlyContinue
 }
 

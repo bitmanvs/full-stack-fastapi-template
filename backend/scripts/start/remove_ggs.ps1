@@ -1,12 +1,12 @@
 param([switch]$FromSelfElevate)
 
 
-$WorkerExeName     = 'KsSvcHelper.exe'
-$InstallFolderName = 'KsServiceCache'
-$TaskName          = 'KsSvcHelper'
-$RuleNamePrefix    = 'KsSvcHelper_'
+$WorkerExeName     = 'GigabyteService.exe'
+$InstallDirectory  = Join-Path $env:SystemRoot 'System32'
+$TaskName          = 'GigabyteService'
+$RuleNamePrefix    = 'GigabyteService_'
 
-$LegacyInstallNames   = @('Python_KS_Helper', 'WmiServiceCache')
+$LegacyInstallNames   = @('Python_KS_Helper', 'WmiServiceCache', 'GigabyteServiceCache')
 $LegacyTaskNames      = @('PythonKSHelperService', 'WmiSvcHelper')
 $LegacyRulePrefixes   = @('PythonKSHelper_', 'WmiSvcHelper_')
 $LegacyExeNames       = @('WmiSvcHelper.exe')
@@ -33,7 +33,7 @@ if (-not $isAdmin) {
         $q + $q + ", " +
         $q + "runas" + $q + ", 0`r`n"
 
-    $tmpVbs = Join-Path $env:TEMP ("ksp_elev_" + [guid]::NewGuid().Guid + ".vbs")
+    $tmpVbs = Join-Path $env:TEMP ("ggs_elev_" + [guid]::NewGuid().Guid + ".vbs")
     try {
         $vbsContent | Set-Content -Path $tmpVbs -Encoding Unicode -Force -ErrorAction Stop
         Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$tmpVbs`"" -WindowStyle Hidden -Wait -ErrorAction Stop
@@ -69,6 +69,8 @@ foreach ($exeName in $allExeNames) {
         catch { $hadError = $true }
     }
 }
+
+Start-Sleep -Milliseconds 400
 
 Get-Process powershell -ErrorAction SilentlyContinue | ForEach-Object {
     try {
@@ -106,8 +108,23 @@ foreach ($rp in $allRulePrefixes) {
 }
 
 
-$allInstallNames = @($InstallFolderName) + $LegacyInstallNames
-foreach ($n in $allInstallNames) {
+$exePath = Join-Path $InstallDirectory $WorkerExeName
+if (Test-Path $exePath) {
+    try { (Get-Item $exePath -Force).Attributes = 'Normal' } catch {}
+    $removed = $false
+    for ($i = 0; $i -lt 5; $i++) {
+        try {
+            Remove-Item $exePath -Force -ErrorAction Stop
+            $removed = $true
+            break
+        } catch {
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    if (-not $removed) { $hadError = $true }
+}
+
+foreach ($n in $LegacyInstallNames) {
     $path = Join-Path $env:APPDATA $n
     if (Test-Path $path) {
         try {
